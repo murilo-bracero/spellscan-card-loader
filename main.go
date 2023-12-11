@@ -2,25 +2,40 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
 
-	"github.com/redis/go-redis/v9"
+	_ "github.com/jackc/pgx/stdlib"
+	"github.com/jmoiron/sqlx"
+	"github.com/joho/godotenv"
+	"github.com/meilisearch/meilisearch-go"
+	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
 )
 
 func main() {
-	client := getRedisConn()
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("Could not load .env file, using env variables instead.")
+	}
+
+	meiliClient := getMeiliClient()
 
 	ctx := context.Background()
 
-	localBulkData, err := getLocalBulkMetadata(ctx, client)
+	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
+
+	if err != nil {
+		panic(err)
+	}
+
+	localBulkData, err := getLocalBulkMetadata(ctx, db)
 
 	if err != nil {
 		panic(err)
@@ -37,10 +52,16 @@ func main() {
 		return
 	}
 
-	client.JSONSet(ctx, "bulk-data", "$", remoteBulkData)
+	if err != nil {
+		panic(err)
+	}
 
-	if err := downloadBulkFile(remoteBulkData); err != nil {
-		client.JSONClear(ctx, "bulk-data", "$")
+	// if err := downloadBulkFile(remoteBulkData); err != nil {
+	// 	_, err := db.Query("DELETE FROM bulk_metadata")
+	// 	panic(err)
+	// }
+
+	if err := eraseMeili(meiliClient); err != nil {
 		panic(err)
 	}
 
@@ -49,41 +70,86 @@ func main() {
 	go sendCardsToChannel(cardsChannel)
 
 	for card := range cardsChannel {
-		if !hasSupportedLanguage(card.Lang) {
+		if !hasSupportedLanguage(card.Lang) || card.Digital {
 			continue
 		}
 
-		id := fmt.Sprintf("card:%s", card.ID)
+		cardDb := models.FromCardJson(card)
 
-		status := client.JSONSet(ctx, id, "$", card)
-
-		if status.Err() != nil {
-			panic(status.Err())
+		if err := cardDb.Save(db); err != nil {
+			log.Println(card.Keywords)
+			panic(err)
 		}
 
-		slog.Info("Saved", "id", id, "name", card.Name, "type", card.TypeLine, "set", card.SetID)
+		if err := saveOnMeili(meiliClient, card); err != nil {
+			panic(err)
+		}
+
+		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 	}
 }
 
-func getRedisConn() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+func eraseMeili(client *meilisearch.Client) error {
+	res, err := client.Index("cards").DeleteAllDocuments()
+
+	if err != nil {
+		return err
+	}
+
+	if res.Status == meilisearch.TaskStatusFailed {
+		return errors.New("task failed")
+	}
+
+	return nil
+}
+
+func saveOnMeili(client *meilisearch.Client, card *objects.Card) error {
+	cardSearch := &objects.CardSearch{
+		ID:   card.ID,
+		Set:  card.Set,
+		Text: card.PrintedText,
+	}
+
+	if card.PrintedName == "" {
+		cardSearch.Name = card.Name
+	} else {
+		cardSearch.Name = card.PrintedName
+	}
+
+	res, err := client.Index("cards").AddDocuments(cardSearch)
+
+	if err != nil {
+		return err
+	}
+
+	if res.Status == meilisearch.TaskStatusFailed {
+		return errors.New("task failed")
+	}
+
+	return nil
+}
+
+func getMeiliClient() *meilisearch.Client {
+	return meilisearch.NewClient(meilisearch.ClientConfig{
+		Host:   os.Getenv("MEILI_URL"),
+		APIKey: os.Getenv("MEILI_API_KEY"),
 	})
 }
 
-func getLocalBulkMetadata(ctx context.Context, client *redis.Client) (*objects.BulkMetadata, error) {
-	raw := client.JSONGet(ctx, "bulk-data")
+func getLocalBulkMetadata(ctx context.Context, db *sqlx.DB) (*objects.BulkMetadata, error) {
 
-	if raw.Val() == "" {
+	var bulkMetadata objects.BulkMetadata
+	err := db.Get(&bulkMetadata, "SELECT * FROM bulk_metadata ORDER BY updated_at DESC LIMIT 1")
+
+	if err == sql.ErrNoRows {
 		return &objects.BulkMetadata{}, nil
 	}
 
-	var bulkMetadata []objects.BulkMetadata
-	err := json.Unmarshal([]byte(raw.Val()), &bulkMetadata)
+	if err != nil {
+		return nil, err
+	}
 
-	return &bulkMetadata[len(bulkMetadata)-1], err
+	return &bulkMetadata, nil
 }
 
 func getRemoteBulkMetadata() (*objects.BulkMetadata, error) {
