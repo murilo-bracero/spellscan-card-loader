@@ -87,6 +87,26 @@ func main() {
 
 		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 	}
+
+	if err := meiliUpdateIndexes(meiliClient); err != nil {
+		slog.Error("Could not update meili filter attributes: ", "error", err)
+	}
+}
+
+func meiliUpdateIndexes(client *meilisearch.Client) error {
+	resp, err := client.Index("cards").UpdateFilterableAttributes(&[]string{
+		"set",
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if resp.Status == meilisearch.TaskStatusFailed {
+		return errors.New("task failed")
+	}
+
+	return nil
 }
 
 func eraseMeili(client *meilisearch.Client) error {
