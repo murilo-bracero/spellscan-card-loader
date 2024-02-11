@@ -135,6 +135,10 @@ func FromCardJson(card *objects.Card) *Card {
 		carddb.TypeLine = card.PrintedTypeLine
 	}
 
+	if card.PrintedText == "" {
+		carddb.PrintedText = card.OracleText
+	}
+
 	return carddb
 }
 
