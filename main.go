@@ -56,10 +56,10 @@ func main() {
 		panic(err)
 	}
 
-	// if err := downloadBulkFile(remoteBulkData); err != nil {
-	// 	_, err := db.Query("DELETE FROM bulk_metadata")
-	// 	panic(err)
-	// }
+	if err := downloadBulkFile(remoteBulkData); err != nil {
+		_, err := db.Query("DELETE FROM bulk_metadata")
+		panic(err)
+	}
 
 	if err := eraseMeili(meiliClient); err != nil {
 		panic(err)
