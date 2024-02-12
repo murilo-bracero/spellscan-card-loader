@@ -1,6 +1,7 @@
 package models
 
 import (
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"spellscan.com/card-loader/objects"
@@ -15,6 +16,7 @@ type Card struct {
 	HighresImage  bool           `db:"highres_image"`
 	ImageStatus   string         `db:"image_status"`
 	ImageUris     *ImageUris     `db:"image_uris"`
+	CardFaces     []*CardFace    `db:"card_faces"`
 	ManaCost      string         `db:"mana_cost"`
 	TypeLine      string         `db:"type_line"`
 	PrintedText   string         `db:"printed_text"`
@@ -62,7 +64,17 @@ func (c *Card) Save(db *sqlx.DB) error {
 		return err
 	}
 
-	return c.ImageUris.Save(db)
+	if err := c.ImageUris.Save(db); err != nil {
+		return err
+	}
+
+	for _, cf := range c.CardFaces {
+		if err := cf.Save(db); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type ImageUris struct {
@@ -96,6 +108,56 @@ func (iu *ImageUris) Save(db *sqlx.DB) error {
 	return nil
 }
 
+type CardFace struct {
+	ID              string         `db:"id"`
+	CardId          string         `db:"card_id"`
+	Name            string         `db:"name"`
+	ManaCost        string         `db:"mana_cost"`
+	TypeLine        string         `db:"type_line"`
+	PrintedText     string         `db:"printed_text"`
+	FlavorText      string         `db:"flavor_text"`
+	Colors          pq.StringArray `db:"colors"`
+	ColorIndicator  pq.StringArray `db:"color_indicator"`
+	ImageSmall      string         `db:"image_small"`
+	ImageNormal     string         `db:"image_normal"`
+	ImageLarge      string         `db:"image_large"`
+	ImagePng        string         `db:"image_png"`
+	ImageArtCrop    string         `db:"image_art_crop"`
+	ImageBorderCrop string         `db:"image_border_crop"`
+}
+
+func (cf *CardFace) Save(db *sqlx.DB) error {
+	cf.ID = uuid.NewString()
+
+	query := `
+	INSERT INTO card_faces (id, card_id ,name ,mana_cost ,type_line ,printed_text ,flavor_text ,colors ,color_indicator ,image_small ,
+		image_normal ,image_large ,image_png ,image_art_crop ,image_border_crop)
+	VALUES (:id, :card_id, :name, :mana_cost, :type_line, :printed_text, :flavor_text, :colors, :color_indicator, :image_small, :image_normal, 
+		:image_large, :image_png, :image_art_crop, :image_border_crop)
+	ON CONFLICT (id) DO UPDATE
+	SET card_id = EXCLUDED.card_id,
+		name = EXCLUDED.name,
+		mana_cost = EXCLUDED.mana_cost,
+		type_line = EXCLUDED.type_line,
+		printed_text = EXCLUDED.printed_text,
+		flavor_text = EXCLUDED.flavor_text,
+		colors = EXCLUDED.colors,
+		color_indicator = EXCLUDED.color_indicator,
+		image_small = EXCLUDED.image_small,
+		image_normal = EXCLUDED.image_normal,
+		image_large = EXCLUDED.image_large,
+		image_png = EXCLUDED.image_png,
+		image_art_crop = EXCLUDED.image_art_crop,
+		image_border_crop = EXCLUDED.image_border_crop
+	`
+
+	if _, err := db.NamedExec(query, cf); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func FromCardJson(card *objects.Card) *Card {
 	carddb := &Card{
 		ID:            card.ID,
@@ -106,6 +168,7 @@ func FromCardJson(card *objects.Card) *Card {
 		HighresImage:  card.HighresImage,
 		ImageStatus:   card.ImageStatus,
 		ImageUris:     fromImageUrisJson(card.ID, &card.ImageUris),
+		CardFaces:     fromCardFacesJson(card.ID, card.CardFaces),
 		ManaCost:      card.ManaCost,
 		TypeLine:      card.TypeLine,
 		PrintedText:   card.PrintedText,
@@ -152,4 +215,29 @@ func fromImageUrisJson(cardId string, imageUris *objects.ImageUris) *ImageUris {
 		ArtCrop:    imageUris.ArtCrop,
 		BorderCrop: imageUris.BorderCrop,
 	}
+}
+
+func fromCardFacesJson(cardId string, cardFaces []objects.CardFace) []*CardFace {
+	var dbcf []*CardFace
+
+	for _, raw := range cardFaces {
+		dbcf = append(dbcf, &CardFace{
+			CardId:          cardId,
+			Name:            raw.Name,
+			ManaCost:        raw.ManaCost,
+			TypeLine:        raw.TypeLine,
+			PrintedText:     raw.OracleText,
+			FlavorText:      raw.FlavorText,
+			Colors:          raw.Colors,
+			ColorIndicator:  raw.ColorIndicator,
+			ImageSmall:      raw.ImageUris.Small,
+			ImageNormal:     raw.ImageUris.Normal,
+			ImageLarge:      raw.ImageUris.Large,
+			ImagePng:        raw.ImageUris.Png,
+			ImageArtCrop:    raw.ImageUris.ArtCrop,
+			ImageBorderCrop: raw.ImageUris.BorderCrop,
+		})
+	}
+
+	return dbcf
 }

@@ -3,6 +3,7 @@ module spellscan.com/card-loader
 go 1.21.1
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx v3.6.2+incompatible
 	github.com/jmoiron/sqlx v1.3.5
 	github.com/meilisearch/meilisearch-go v0.26.0

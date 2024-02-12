@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -67,6 +68,12 @@ func main() {
 
 	cardsChannel := make(chan *objects.Card)
 
+	clearCardFaces(db)
+
+	start := time.Now()
+
+	slog.Info("Started insertion job", "start", start)
+
 	go sendCardsToChannel(cardsChannel)
 
 	for card := range cardsChannel {
@@ -87,6 +94,8 @@ func main() {
 
 		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 	}
+
+	slog.Info("Ended insertion job", "end", time.Now().Unix()-start.Unix())
 
 	if err := meiliUpdateIndexes(meiliClient); err != nil {
 		slog.Error("Could not update meili filter attributes: ", "error", err)
@@ -147,6 +156,10 @@ func saveOnMeili(client *meilisearch.Client, card *objects.Card) error {
 	}
 
 	return nil
+}
+
+func clearCardFaces(db *sqlx.DB) {
+	db.Exec("DELETE FROM card_faces")
 }
 
 func getMeiliClient() *meilisearch.Client {

@@ -9,6 +9,23 @@ type ImageUris struct {
 	BorderCrop string `json:"border_crop"`
 }
 
+type CardFace struct {
+	Object         string    `json:"object"`
+	Name           string    `json:"name"`
+	ManaCost       string    `json:"mana_cost"`
+	TypeLine       string    `json:"type_line"`
+	OracleText     string    `json:"oracle_text"`
+	FlavorText     string    `json:"flavor_text"`
+	Colors         []string  `json:"colors"`
+	ColorIndicator []string  `json:"color_indicator"`
+	Power          string    `json:"power"`
+	Toughness      string    `json:"toughness"`
+	Artist         string    `json:"artist"`
+	ArtistID       string    `json:"artist_id"`
+	IllustrationID string    `json:"illustration_id"`
+	ImageUris      ImageUris `json:"image_uris"`
+}
+
 type Legalities struct {
 	Standard        string `json:"standard"`
 	Future          string `json:"future"`
@@ -71,6 +88,7 @@ type Card struct {
 	HighresImage    bool         `json:"highres_image"`
 	ImageStatus     string       `json:"image_status"`
 	ImageUris       ImageUris    `json:"image_uris"`
+	CardFaces       []CardFace   `json:"card_faces"`
 	ManaCost        string       `json:"mana_cost"`
 	CMC             float64      `json:"cmc"`
 	TypeLine        string       `json:"type_line"`
