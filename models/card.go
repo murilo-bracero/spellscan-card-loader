@@ -8,34 +8,35 @@ import (
 )
 
 type Card struct {
-	ID            string         `db:"id"`
-	Name          string         `db:"name"`
-	Lang          string         `db:"lang"`
-	ReleasedAt    string         `db:"released_at"`
-	Layout        string         `db:"layout"`
-	HighresImage  bool           `db:"highres_image"`
-	ImageStatus   string         `db:"image_status"`
-	ImageUris     *ImageUris     `db:"image_uris"`
-	CardFaces     []*CardFace    `db:"card_faces"`
-	ManaCost      string         `db:"mana_cost"`
-	TypeLine      string         `db:"type_line"`
-	PrintedText   string         `db:"printed_text"`
-	Colors        pq.StringArray `db:"colors"`
-	ColorIdentity pq.StringArray `db:"color_identity"`
-	Keywords      pq.StringArray `db:"keywords"`
-	Reserved      bool           `db:"reserved"`
-	Foil          bool           `db:"foil"`
-	Nonfoil       bool           `db:"nonfoil"`
-	Oversized     bool           `db:"oversized"`
-	Promo         bool           `db:"promo"`
-	Variation     bool           `db:"variation"`
-	Set           string         `db:"set"`
-	Rarity        string         `db:"rarity"`
-	FlavorText    string         `db:"flavor_text"`
-	Artist        string         `db:"artist"`
-	Frame         string         `db:"frame"`
-	FullArt       bool           `db:"full_art"`
-	Textless      bool           `db:"textless"`
+	ID              string         `db:"id"`
+	Name            string         `db:"name"`
+	Lang            string         `db:"lang"`
+	ReleasedAt      string         `db:"released_at"`
+	Layout          string         `db:"layout"`
+	HighresImage    bool           `db:"highres_image"`
+	ImageStatus     string         `db:"image_status"`
+	ImageUris       *ImageUris     `db:"image_uris"`
+	CardFaces       []*CardFace    `db:"card_faces"`
+	ManaCost        string         `db:"mana_cost"`
+	TypeLine        string         `db:"type_line"`
+	PrintedText     string         `db:"printed_text"`
+	Colors          pq.StringArray `db:"colors"`
+	ColorIdentity   pq.StringArray `db:"color_identity"`
+	Keywords        pq.StringArray `db:"keywords"`
+	Reserved        bool           `db:"reserved"`
+	Foil            bool           `db:"foil"`
+	Nonfoil         bool           `db:"nonfoil"`
+	Oversized       bool           `db:"oversized"`
+	Promo           bool           `db:"promo"`
+	Variation       bool           `db:"variation"`
+	Set             string         `db:"set"`
+	Rarity          string         `db:"rarity"`
+	FlavorText      string         `db:"flavor_text"`
+	Artist          string         `db:"artist"`
+	Frame           string         `db:"frame"`
+	FullArt         bool           `db:"full_art"`
+	Textless        bool           `db:"textless"`
+	CollectorNumber string         `db:"collector_number"`
 }
 
 func (c *Card) Save(db *sqlx.DB) error {
@@ -44,11 +45,11 @@ func (c *Card) Save(db *sqlx.DB) error {
 		INSERT INTO card (id, name, lang, released_at, layout, highres_image, image_status, 
 			mana_cost, type_line, printed_text, colors, color_identity, keywords, 
 			reserved, foil, nonfoil, oversized, promo, variation, set, rarity, flavor_text, 
-			artist, frame, full_art, textless)
+			artist, frame, full_art, textless, collector_number)
 		VALUES (:id, :name, :lang, :released_at, :layout, :highres_image, :image_status, 
 			:mana_cost, :type_line, :printed_text, :colors, :color_identity, :keywords, 
 			:reserved, :foil, :nonfoil, :oversized, :promo, :variation, :set, :rarity, :flavor_text, 
-			:artist, :frame, :full_art, :textless)
+			:artist, :frame, :full_art, :textless, :collector_number)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name, lang = EXCLUDED.lang, released_at = EXCLUDED.released_at,
 			layout = EXCLUDED.layout, highres_image = EXCLUDED.highres_image, image_status = EXCLUDED.image_status,
@@ -57,7 +58,7 @@ func (c *Card) Save(db *sqlx.DB) error {
 			keywords = EXCLUDED.keywords, reserved = EXCLUDED.reserved, foil = EXCLUDED.foil, nonfoil = EXCLUDED.nonfoil,
 			oversized = EXCLUDED.oversized, promo = EXCLUDED.promo, variation = EXCLUDED.variation, set = EXCLUDED.set,
 			rarity = EXCLUDED.rarity, flavor_text = EXCLUDED.flavor_text, artist = EXCLUDED.artist, frame = EXCLUDED.frame,
-			full_art = EXCLUDED.full_art, textless = EXCLUDED.textless
+			full_art = EXCLUDED.full_art, textless = EXCLUDED.textless, collector_number = EXCLUDED.collector_number
 		`
 
 	if _, err := db.NamedExec(query, c); err != nil {
@@ -160,34 +161,35 @@ func (cf *CardFace) Save(db *sqlx.DB) error {
 
 func FromCardJson(card *objects.Card) *Card {
 	carddb := &Card{
-		ID:            card.ID,
-		Name:          card.Name,
-		Lang:          card.Lang,
-		ReleasedAt:    card.ReleasedAt,
-		Layout:        card.Layout,
-		HighresImage:  card.HighresImage,
-		ImageStatus:   card.ImageStatus,
-		ImageUris:     fromImageUrisJson(card.ID, &card.ImageUris),
-		CardFaces:     fromCardFacesJson(card.ID, card.CardFaces),
-		ManaCost:      card.ManaCost,
-		TypeLine:      card.TypeLine,
-		PrintedText:   card.PrintedText,
-		Colors:        card.Colors,
-		ColorIdentity: card.ColorIdentity,
-		Keywords:      card.Keywords,
-		Reserved:      card.Reserved,
-		Foil:          card.Foil,
-		Nonfoil:       card.Nonfoil,
-		Oversized:     card.Oversized,
-		Promo:         card.Promo,
-		Variation:     card.Variation,
-		Set:           card.Set,
-		Rarity:        card.Rarity,
-		FlavorText:    card.FlavorText,
-		Artist:        card.Artist,
-		Frame:         card.Frame,
-		FullArt:       card.FullArt,
-		Textless:      card.Textless,
+		ID:              card.ID,
+		Name:            card.Name,
+		Lang:            card.Lang,
+		ReleasedAt:      card.ReleasedAt,
+		Layout:          card.Layout,
+		HighresImage:    card.HighresImage,
+		ImageStatus:     card.ImageStatus,
+		ImageUris:       fromImageUrisJson(card.ID, &card.ImageUris),
+		CardFaces:       fromCardFacesJson(card.ID, card.CardFaces),
+		ManaCost:        card.ManaCost,
+		TypeLine:        card.TypeLine,
+		PrintedText:     card.PrintedText,
+		Colors:          card.Colors,
+		ColorIdentity:   card.ColorIdentity,
+		Keywords:        card.Keywords,
+		Reserved:        card.Reserved,
+		Foil:            card.Foil,
+		Nonfoil:         card.Nonfoil,
+		Oversized:       card.Oversized,
+		Promo:           card.Promo,
+		Variation:       card.Variation,
+		Set:             card.Set,
+		Rarity:          card.Rarity,
+		FlavorText:      card.FlavorText,
+		Artist:          card.Artist,
+		Frame:           card.Frame,
+		FullArt:         card.FullArt,
+		Textless:        card.Textless,
+		CollectorNumber: card.CollectorNumber,
 	}
 
 	if card.PrintedName != "" {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,7 +22,7 @@ import (
 func main() {
 
 	if err := godotenv.Load(); err != nil {
-		log.Println("Could not load .env file, using env variables instead.")
+		slog.Info("Could not load .env file, using env variables instead")
 	}
 
 	meiliClient := getMeiliClient()
@@ -49,12 +48,8 @@ func main() {
 	}
 
 	if remoteBulkData.Size == localBulkData.Size {
-		log.Printf("Same data, nothing to do")
+		slog.Info("Same data, nothing to do", "size", localBulkData.Size)
 		return
-	}
-
-	if err != nil {
-		panic(err)
 	}
 
 	if err := downloadBulkFile(remoteBulkData); err != nil {
@@ -84,7 +79,7 @@ func main() {
 		cardDb := models.FromCardJson(card)
 
 		if err := cardDb.Save(db); err != nil {
-			log.Println(card.Keywords)
+			slog.Error("Could not save card in database", "cardId", cardDb.ID, "err", err.Error())
 			panic(err)
 		}
 
@@ -95,10 +90,10 @@ func main() {
 		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 	}
 
-	slog.Info("Ended insertion job", "end", time.Now().Unix()-start.Unix())
+	slog.Info("Ended insertion job", "duration", time.Now().Unix()-start.Unix())
 
 	if err := meiliUpdateIndexes(meiliClient); err != nil {
-		slog.Error("Could not update meili filter attributes: ", "error", err)
+		slog.Error("Could not update meili filter attributes", "error", err)
 	}
 }
 
@@ -230,6 +225,10 @@ func downloadBulkFile(data *objects.BulkMetadata) error {
 
 	defer out.Close()
 
+	start := time.Now()
+
+	slog.Info("Starting downloading bulk data", "start", start)
+
 	res, err := http.Get(data.DownloadURI)
 
 	if err != nil {
@@ -243,6 +242,8 @@ func downloadBulkFile(data *objects.BulkMetadata) error {
 	defer res.Body.Close()
 
 	_, err = io.Copy(out, res.Body)
+
+	slog.Info("Finished download bulk data", "duration", start.Unix()-time.Now().Unix())
 
 	return err
 }
