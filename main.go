@@ -30,6 +30,7 @@ func main() {
 	ctx := context.Background()
 
 	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
+	db.SetMaxOpenConns(1)
 
 	if err != nil {
 		panic(err)
@@ -72,22 +73,7 @@ func main() {
 	go sendCardsToChannel(cardsChannel)
 
 	for card := range cardsChannel {
-		if !hasSupportedLanguage(card.Lang) || card.Digital {
-			continue
-		}
-
-		cardDb := models.FromCardJson(card)
-
-		if err := cardDb.Save(db); err != nil {
-			slog.Error("Could not save card in database", "cardId", cardDb.ID, "err", err.Error())
-			panic(err)
-		}
-
-		if err := saveOnMeili(meiliClient, card); err != nil {
-			panic(err)
-		}
-
-		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
+		saveCard(db, meiliClient, card)
 	}
 
 	slog.Info("Ended insertion job", "duration", time.Now().Unix()-start.Unix())
@@ -95,6 +81,29 @@ func main() {
 	if err := meiliUpdateIndexes(meiliClient); err != nil {
 		slog.Error("Could not update meili filter attributes", "error", err)
 	}
+
+	if err := saveBulkMetadata(db, remoteBulkData); err != nil {
+		panic(err)
+	}
+}
+
+func saveCard(db *sqlx.DB, meiliClient *meilisearch.Client, card *objects.Card) {
+	if !hasSupportedLanguage(card.Lang) || card.Digital {
+		return
+	}
+
+	cardDb := models.FromCardJson(card)
+
+	if err := cardDb.Save(db); err != nil {
+		slog.Error("Could not save card in database", "cardId", cardDb.ID, "err", err.Error())
+		panic(err)
+	}
+
+	if err := saveOnMeili(meiliClient, card); err != nil {
+		panic(err)
+	}
+
+	slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 }
 
 func meiliUpdateIndexes(client *meilisearch.Client) error {
@@ -178,6 +187,19 @@ func getLocalBulkMetadata(ctx context.Context, db *sqlx.DB) (*objects.BulkMetada
 	}
 
 	return &bulkMetadata, nil
+}
+
+func saveBulkMetadata(db *sqlx.DB, bm *objects.BulkMetadata) error {
+	query := `
+		INSERT INTO bulk_metadata (object, id, type, updated_at, uri, name, description, size, download_uri, content_type, content_encoding)
+		VALUES (:object, :id, :type, :updated_at, :uri, :name, :description, :size, :download_uri, :content_type, :content_encoding)
+		`
+
+	if _, err := db.NamedExec(query, bm); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func getRemoteBulkMetadata() (*objects.BulkMetadata, error) {
