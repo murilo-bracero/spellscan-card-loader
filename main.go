@@ -62,13 +62,13 @@ func main() {
 		panic(err)
 	}
 
-	cardsChannel := make(chan *objects.Card)
-
 	clearCardFaces(db)
 
 	start := time.Now()
 
 	slog.Info("Started insertion job", "start", start)
+
+	cardsChannel := make(chan *objects.Card)
 
 	go sendCardsToChannel(cardsChannel)
 
@@ -89,6 +89,10 @@ func main() {
 
 func saveCard(db *sqlx.DB, meiliClient *meilisearch.Client, card *objects.Card) {
 	if !hasSupportedLanguage(card.Lang) || card.Digital {
+		return
+	}
+
+	if card.Layout == "art_series" {
 		return
 	}
 
