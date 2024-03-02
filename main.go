@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -27,16 +26,15 @@ func main() {
 
 	meiliClient := getMeiliClient()
 
-	ctx := context.Background()
-
 	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
-	db.SetMaxOpenConns(1)
 
 	if err != nil {
 		panic(err)
 	}
 
-	localBulkData, err := getLocalBulkMetadata(ctx, db)
+	db.SetMaxOpenConns(1)
+
+	localBulkData, err := getLocalBulkMetadata(db)
 
 	if err != nil {
 		panic(err)
@@ -177,7 +175,7 @@ func getMeiliClient() *meilisearch.Client {
 	})
 }
 
-func getLocalBulkMetadata(ctx context.Context, db *sqlx.DB) (*objects.BulkMetadata, error) {
+func getLocalBulkMetadata(db *sqlx.DB) (*objects.BulkMetadata, error) {
 
 	var bulkMetadata objects.BulkMetadata
 	err := db.Get(&bulkMetadata, "SELECT * FROM bulk_metadata ORDER BY updated_at DESC LIMIT 1")
