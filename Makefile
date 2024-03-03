@@ -14,9 +14,13 @@ run:
 
 dockerBuild:
 	docker build \
-		-t spellscan-card-loader:$version \
-		-t spellscan-card-loader:latest \
+		-t ghcr.io/murilo-bracero/spellscan-card-loader:$(version) \
+		-t ghcr.io/murilo-bracero/spellscan-card-loader:latest \
 		.
+
+dockerPublish:
+	docker push ghcr.io/murilo-bracero/spellscan-card-loader:$(version)
+	docker push ghcr.io/murilo-bracero/spellscan-card-loader:latest
 
 dockerRun:
 	docker run --rm \
