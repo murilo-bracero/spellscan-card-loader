@@ -267,7 +267,7 @@ func downloadBulkFile(data *objects.BulkMetadata) error {
 
 	_, err = io.Copy(out, res.Body)
 
-	slog.Info("Finished download bulk data", "duration", start.Unix()-time.Now().Unix())
+	slog.Info("Finished download bulk data", "duration", time.Now().Unix()-start.Unix())
 
 	return err
 }
