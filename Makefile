@@ -27,7 +27,7 @@ dockerRun:
 		-e DB_DSN=$(DB_DSN) \
 		-e MEILI_URL=$(MEILI_URL) \
 		-e MEILI_API_KEY=$(MEILI_API_KEY) \
-		spellscan-card-loader:latest
+		ghcr.io/murilo-bracero/spellscan-card-loader:latest
 
 clean:
 	rm -r build || true
