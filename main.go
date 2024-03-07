@@ -131,18 +131,16 @@ func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
 	entity := models.FromCardJson(card)
 
 	wg.Add(1)
-	go saveOnDb(db, entity, wg)
+	go func() {
+		defer wg.Done()
+
+		if err := entity.Save(db); err != nil {
+			slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
+			os.Exit(1)
+		}
+	}()
 
 	slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
-}
-
-func saveOnDb(db *sqlx.DB, card *models.Card, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	if err := card.Save(db); err != nil {
-		slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
-		os.Exit(1)
-	}
 }
 
 func clearCardFaces(db *sqlx.DB) {
