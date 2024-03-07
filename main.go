@@ -1,13 +1,10 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/stdlib"
@@ -16,34 +13,41 @@ import (
 	"github.com/meilisearch/meilisearch-go"
 	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
+	"spellscan.com/card-loader/services"
 )
 
 func main() {
-
 	if err := godotenv.Load(); err != nil {
-		slog.Info("Could not load .env file, using env variables instead")
+		slog.Warn("Could not load .env file, using env variables instead")
 	}
 
 	meiliClient := getMeiliClient()
 
+	meiliService := services.NewMeiliService(meiliClient)
+
 	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not connect to database", "err", err)
+		os.Exit(1)
 	}
 
 	db.SetMaxOpenConns(1)
 
-	localBulkData, err := getLocalBulkMetadata(db)
+	metadataService := services.NewMetadataService(db)
+
+	localBulkData, err := metadataService.GetLocalBulkMetadata()
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not get bulk metadata from database", "err", err)
+		os.Exit(1)
 	}
 
-	remoteBulkData, err := getRemoteBulkMetadata()
+	remoteBulkData, err := metadataService.GetRemoteBulkMetadata()
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not get bulk metadata from remote server", "err", err)
+		os.Exit(1)
 	}
 
 	if remoteBulkData.Size == localBulkData.Size {
@@ -51,13 +55,14 @@ func main() {
 		return
 	}
 
-	if err := downloadBulkFile(remoteBulkData); err != nil {
-		_, err := db.Query("DELETE FROM bulk_metadata")
-		panic(err)
+	if err := metadataService.DownloadBulkFile(remoteBulkData); err != nil {
+		slog.Error("Could not download bulk metadata from remote server", "err", err)
+		os.Exit(1)
 	}
 
-	if err := eraseMeili(meiliClient); err != nil {
-		panic(err)
+	if err := meiliService.DeleteAll(); err != nil {
+		slog.Error("Could not delete data from meilisearch", "err", err)
+		os.Exit(1)
 	}
 
 	clearCardFaces(db)
@@ -70,22 +75,51 @@ func main() {
 
 	go sendCardsToChannel(cardsChannel)
 
+	var cards []*objects.Card
+
+	var wg sync.WaitGroup
+
 	for card := range cardsChannel {
-		saveCard(db, meiliClient, card)
+		cards = append(cards, card)
+		saveCard(db, card, &wg)
+
+		if len(cards) == 100 {
+			err := meiliService.SaveAll(cards)
+
+			if err != nil {
+				slog.Error("Could not save cards in meilisearch", "err", err)
+				os.Exit(1)
+			}
+
+			cards = nil
+		}
 	}
+
+	if len(cards) != 0 {
+		err := meiliService.SaveAll(cards)
+
+		if err != nil {
+			slog.Error("Error while processing remanescent cards", "err", err)
+			os.Exit(1)
+		}
+		cards = nil
+	}
+
+	wg.Wait()
 
 	slog.Info("Ended insertion job", "duration", time.Now().Unix()-start.Unix())
 
-	if err := meiliUpdateIndexes(meiliClient); err != nil {
+	if err := meiliService.UpdateIndexes(); err != nil {
 		slog.Error("Could not update meili filter attributes", "error", err)
 	}
 
-	if err := saveBulkMetadata(db, remoteBulkData); err != nil {
-		panic(err)
+	if err := metadataService.Save(remoteBulkData); err != nil {
+		slog.Error("Could not save bulk metadata in database", "err", err)
+		os.Exit(1)
 	}
 }
 
-func saveCard(db *sqlx.DB, meiliClient *meilisearch.Client, card *objects.Card) {
+func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
 	if !hasSupportedLanguage(card.Lang) || card.Digital {
 		return
 	}
@@ -94,74 +128,21 @@ func saveCard(db *sqlx.DB, meiliClient *meilisearch.Client, card *objects.Card) 
 		return
 	}
 
-	cardDb := models.FromCardJson(card)
+	entity := models.FromCardJson(card)
 
-	if err := cardDb.Save(db); err != nil {
-		slog.Error("Could not save card in database", "cardId", cardDb.ID, "err", err.Error())
-		panic(err)
-	}
-
-	if err := saveOnMeili(meiliClient, card); err != nil {
-		panic(err)
-	}
+	wg.Add(1)
+	go saveOnDb(db, entity, wg)
 
 	slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
 }
 
-func meiliUpdateIndexes(client *meilisearch.Client) error {
-	resp, err := client.Index("cards").UpdateFilterableAttributes(&[]string{
-		"set",
-	})
+func saveOnDb(db *sqlx.DB, card *models.Card, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	if err != nil {
-		return err
+	if err := card.Save(db); err != nil {
+		slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
+		os.Exit(1)
 	}
-
-	if resp.Status == meilisearch.TaskStatusFailed {
-		return errors.New("task failed")
-	}
-
-	return nil
-}
-
-func eraseMeili(client *meilisearch.Client) error {
-	res, err := client.Index("cards").DeleteAllDocuments()
-
-	if err != nil {
-		return err
-	}
-
-	if res.Status == meilisearch.TaskStatusFailed {
-		return errors.New("task failed")
-	}
-
-	return nil
-}
-
-func saveOnMeili(client *meilisearch.Client, card *objects.Card) error {
-	cardSearch := &objects.CardSearch{
-		ID:   card.ID,
-		Set:  card.Set,
-		Text: card.PrintedText,
-	}
-
-	if card.PrintedName == "" {
-		cardSearch.Name = card.Name
-	} else {
-		cardSearch.Name = card.PrintedName
-	}
-
-	res, err := client.Index("cards").AddDocuments(cardSearch)
-
-	if err != nil {
-		return err
-	}
-
-	if res.Status == meilisearch.TaskStatusFailed {
-		return errors.New("task failed")
-	}
-
-	return nil
 }
 
 func clearCardFaces(db *sqlx.DB) {
@@ -175,108 +156,12 @@ func getMeiliClient() *meilisearch.Client {
 	})
 }
 
-func getLocalBulkMetadata(db *sqlx.DB) (*objects.BulkMetadata, error) {
-
-	var bulkMetadata objects.BulkMetadata
-	err := db.Get(&bulkMetadata, "SELECT * FROM bulk_metadata ORDER BY updated_at DESC LIMIT 1")
-
-	if err == sql.ErrNoRows {
-		return &objects.BulkMetadata{}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &bulkMetadata, nil
-}
-
-func saveBulkMetadata(db *sqlx.DB, bm *objects.BulkMetadata) error {
-	query := `
-		INSERT INTO bulk_metadata (object, id, type, updated_at, uri, name, description, size, download_uri, content_type, content_encoding)
-		VALUES (:object, :id, :type, :updated_at, :uri, :name, :description, :size, :download_uri, :content_type, :content_encoding)
-		`
-
-	if _, err := db.NamedExec(query, bm); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getRemoteBulkMetadata() (*objects.BulkMetadata, error) {
-	url := "https://api.scryfall.com/bulk-data"
-
-	res, err := http.Get(url)
-
-	if err != nil {
-		return nil, err
-	}
-
-	if res.StatusCode != http.StatusOK {
-		return nil, errors.New("scryfall is not available")
-	}
-
-	var root objects.BulkMetadataRoot
-	err = json.NewDecoder(res.Body).Decode(&root)
-	if err != nil {
-		return nil, err
-	}
-
-	var bulkMetadata objects.BulkMetadata
-
-	for _, object := range root.Data {
-		if object.Type == "all_cards" {
-			bulkMetadata = object
-		}
-	}
-
-	return &bulkMetadata, nil
-}
-
-func downloadBulkFile(data *objects.BulkMetadata) error {
-	if err := os.Mkdir("tmp", 0700); err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
-
-	out, err := os.Create("./tmp/bulk_data.json")
-
-	if err != nil {
-		return err
-	}
-
-	defer out.Close()
-
-	start := time.Now()
-
-	slog.Info("Starting downloading bulk data", "start", start)
-
-	res, err := http.Get(data.DownloadURI)
-
-	if err != nil {
-		return err
-	}
-
-	if res.StatusCode != http.StatusOK {
-		return errors.New("scryfall API is not available")
-	}
-
-	defer res.Body.Close()
-
-	_, err = io.Copy(out, res.Body)
-
-	slog.Info("Finished download bulk data", "duration", time.Now().Unix()-start.Unix())
-
-	return err
-}
-
 func sendCardsToChannel(c chan *objects.Card) {
 	f, err := os.Open("./tmp/bulk_data.json")
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not open temp folder with bulk data json file", "err", err)
+		os.Exit(1)
 	}
 
 	dec := json.NewDecoder(f)
@@ -284,14 +169,16 @@ func sendCardsToChannel(c chan *objects.Card) {
 	_, err = dec.Token()
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not decode token of bulk data json file", "err", err)
+		os.Exit(1)
 	}
 
 	for dec.More() {
 		var card objects.Card
 		err := dec.Decode(&card)
 		if err != nil {
-			panic(err)
+			slog.Error("Could not decode json slice into card", "err", err)
+			os.Exit(1)
 		}
 
 		c <- &card
@@ -300,7 +187,8 @@ func sendCardsToChannel(c chan *objects.Card) {
 	_, err = dec.Token()
 
 	if err != nil {
-		panic(err)
+		slog.Error("Could not decode token of bulk data json file", "err", err)
+		os.Exit(1)
 	}
 
 	close(c)
