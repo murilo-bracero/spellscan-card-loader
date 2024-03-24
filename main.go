@@ -32,11 +32,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(3)
 
 	metadataService := services.NewMetadataService(db)
 
-	localBulkData, err := metadataService.GetLocalBulkMetadata()
+	jobResult, err := metadataService.GetLastJobResult()
 
 	if err != nil {
 		slog.Error("Could not get bulk metadata from database", "err", err)
@@ -50,8 +50,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if remoteBulkData.Size == localBulkData.Size {
-		slog.Info("Same data, nothing to do", "size", localBulkData.Size)
+	if remoteBulkData.Size == jobResult.Size {
+		slog.Info("Same data, nothing to do", "size", jobResult.Size)
 		return
 	}
 
@@ -66,6 +66,7 @@ func main() {
 	}
 
 	clearCardFaces(db)
+	clearImageUris(db)
 
 	start := time.Now()
 
@@ -107,14 +108,15 @@ func main() {
 
 	wg.Wait()
 
-	slog.Info("Ended insertion job", "duration", time.Now().Unix()-start.Unix())
+	end := time.Now()
+	slog.Info("Ended insertion job", "duration", end.Unix()-start.Unix())
 
 	if err := meiliService.UpdateIndexes(); err != nil {
 		slog.Error("Could not update meili filter attributes", "error", err)
 	}
 
-	if err := metadataService.Save(remoteBulkData); err != nil {
-		slog.Error("Could not save bulk metadata in database", "err", err)
+	if err := metadataService.Save(remoteBulkData, start, end); err != nil {
+		slog.Error("Could not save job result in database", "err", err)
 		os.Exit(1)
 	}
 }
@@ -138,13 +140,17 @@ func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
 			slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
 			os.Exit(1)
 		}
-	}()
 
-	slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
+		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
+	}()
 }
 
 func clearCardFaces(db *sqlx.DB) {
 	db.Exec("DELETE FROM card_faces")
+}
+
+func clearImageUris(db *sqlx.DB) {
+	db.Exec("DELETE FROM image_uris")
 }
 
 func getMeiliClient() *meilisearch.Client {

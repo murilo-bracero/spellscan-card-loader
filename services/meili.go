@@ -30,8 +30,9 @@ func (m *meiliService) SaveAll(cards []*objects.Card) error {
 
 	for _, card := range cards {
 		cardSearch := &objects.CardSearch{
-			ID:  card.ID,
-			Set: card.Set,
+			ID:   card.ID,
+			Name: card.Name,
+			Set:  card.Set,
 		}
 
 		if card.PrintedName != "" {

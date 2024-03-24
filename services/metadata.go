@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
 )
 
@@ -19,10 +20,10 @@ const scryfallBaseUrl = "https://api.scryfall.com/bulk-data"
 var ErrScryfallNotAvailable = errors.New("scryfall is not available")
 
 type MetadataService interface {
-	GetLocalBulkMetadata() (*objects.BulkMetadata, error)
+	GetLastJobResult() (*models.JobResult, error)
 	GetRemoteBulkMetadata() (*objects.BulkMetadata, error)
 	DownloadBulkFile(data *objects.BulkMetadata) error
-	Save(bm *objects.BulkMetadata) error
+	Save(bm *objects.BulkMetadata, start time.Time, end time.Time) error
 }
 
 type metadataService struct {
@@ -33,19 +34,19 @@ func NewMetadataService(db *sqlx.DB) MetadataService {
 	return &metadataService{db: db}
 }
 
-func (m *metadataService) GetLocalBulkMetadata() (*objects.BulkMetadata, error) {
-	var bulkMetadata objects.BulkMetadata
-	err := m.db.Get(&bulkMetadata, "SELECT * FROM bulk_metadata ORDER BY updated_at DESC LIMIT 1")
+func (m *metadataService) GetLastJobResult() (*models.JobResult, error) {
+	var jobResult models.JobResult
+	err := m.db.Get(&jobResult, "SELECT * FROM job_results ORDER BY reference_date DESC LIMIT 1")
 
 	if err == sql.ErrNoRows {
-		return &objects.BulkMetadata{}, nil
+		return &models.JobResult{}, nil
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &bulkMetadata, nil
+	return &jobResult, nil
 }
 
 func (m *metadataService) GetRemoteBulkMetadata() (*objects.BulkMetadata, error) {
@@ -119,13 +120,15 @@ func (m *metadataService) DownloadBulkFile(data *objects.BulkMetadata) error {
 	return err
 }
 
-func (m *metadataService) Save(bm *objects.BulkMetadata) error {
-	query := `
-		INSERT INTO bulk_metadata (object, id, type, updated_at, uri, name, description, size, download_uri, content_type, content_encoding)
-		VALUES (:object, :id, :type, :updated_at, :uri, :name, :description, :size, :download_uri, :content_type, :content_encoding)
-		`
+func (m *metadataService) Save(bm *objects.BulkMetadata, start time.Time, end time.Time) error {
+	jr := &models.JobResult{
+		Size:          bm.Size,
+		ReferenceDate: bm.UpdatedAt,
+		Started:       start,
+		Finished:      end,
+	}
 
-	if _, err := m.db.NamedExec(query, bm); err != nil {
+	if err := jr.Save(m.db); err != nil {
 		return err
 	}
 
