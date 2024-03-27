@@ -27,10 +27,8 @@ type Card struct {
 	PrintedText     string         `db:"printed_text"`
 	Colors          pq.StringArray `db:"colors"`
 	ColorIdentity   pq.StringArray `db:"color_identity"`
-	Keywords        pq.StringArray `db:"keywords"`
 	Reserved        bool           `db:"reserved"`
-	Foil            bool           `db:"foil"`
-	Nonfoil         bool           `db:"nonfoil"`
+	Finishes        pq.StringArray `db:"finishes"`
 	Promo           bool           `db:"promo"`
 	Variation       bool           `db:"variation"`
 	Set             string         `db:"card_set"`
@@ -47,19 +45,24 @@ func (c *Card) Save(db *sqlx.DB) error {
 
 	query := `
 		INSERT INTO cards (id, card_name, lang, released_at, layout, image_status, 
-			mana_cost, type_line, printed_text, colors, color_identity, keywords, 
-			reserved, foil, nonfoil, promo, variation, card_set, rarity, flavor_text, 
+			mana_cost, type_line, printed_text, colors, color_identity,  
+			reserved, 
+			finishes,
+			promo, variation, card_set, rarity, flavor_text, 
 			artist, frame, full_art, textless, collector_number)
 		VALUES (:id, :card_name, :lang, :released_at, :layout, :image_status, 
-			:mana_cost, :type_line, :printed_text, :colors, :color_identity, :keywords, 
-			:reserved, :foil, :nonfoil, :promo, :variation, :card_set, :rarity, :flavor_text, 
+			:mana_cost, :type_line, :printed_text, :colors, :color_identity, 
+			:reserved, 
+			:finishes, 
+			:promo, :variation, :card_set, :rarity, :flavor_text, 
 			:artist, :frame, :full_art, :textless, :collector_number)
 		ON CONFLICT (id) DO UPDATE
 		SET card_name = EXCLUDED.card_name, lang = EXCLUDED.lang, released_at = EXCLUDED.released_at,
 			layout = EXCLUDED.layout, image_status = EXCLUDED.image_status,
 			mana_cost = EXCLUDED.mana_cost, type_line = EXCLUDED.type_line,
 			printed_text = EXCLUDED.printed_text, colors = EXCLUDED.colors, color_identity = EXCLUDED.color_identity,
-			keywords = EXCLUDED.keywords, reserved = EXCLUDED.reserved, foil = EXCLUDED.foil, nonfoil = EXCLUDED.nonfoil,
+			reserved = EXCLUDED.reserved,
+			finishes = EXCLUDED.finishes,
 			promo = EXCLUDED.promo, variation = EXCLUDED.variation, card_set = EXCLUDED.card_set,
 			rarity = EXCLUDED.rarity, flavor_text = EXCLUDED.flavor_text, artist = EXCLUDED.artist, frame = EXCLUDED.frame,
 			full_art = EXCLUDED.full_art, textless = EXCLUDED.textless, collector_number = EXCLUDED.collector_number
@@ -97,10 +100,8 @@ func FromCardJson(card *objects.Card) *Card {
 		PrintedText:     card.PrintedText,
 		Colors:          card.Colors,
 		ColorIdentity:   card.ColorIdentity,
-		Keywords:        card.Keywords,
 		Reserved:        card.Reserved,
-		Foil:            card.Foil,
-		Nonfoil:         card.Nonfoil,
+		Finishes:        card.Finishes,
 		Promo:           card.Promo,
 		Variation:       card.Variation,
 		Set:             card.Set,
