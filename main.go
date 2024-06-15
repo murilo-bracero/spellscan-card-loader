@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,8 +66,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	clearCardFaces(db)
-	clearImageUris(db)
+	useReleaseDateReference, _ := strconv.ParseBool(os.Getenv("USE_RELEASE_DATE_REFERENCE"))
+
+	if !useReleaseDateReference {
+		start := time.Now()
+		slog.Info("USE_RELEASE_DATE_REFERENCE is false, removing all card fazes and image uris", "start", start)
+		clearCardFaces(db)
+		clearImageUris(db)
+		end := time.Now()
+		slog.Info("card faces and image uris removal finished", "end", end.Unix()-start.Unix())
+	}
+
+	var releaseDateReference time.Time
+
+	if useReleaseDateReference {
+		rows, err := db.Query("SELECT max(released_at) FROM public.cards")
+
+		if err != nil {
+			slog.Error("Could not fetch max release date from database", "error", err)
+			os.Exit(1)
+		}
+
+		if rows.Next() {
+			if err := rows.Scan(&releaseDateReference); err != nil {
+				slog.Error("Could not fetch max release date from database", "error", err)
+				os.Exit(1)
+			}
+		}
+	}
 
 	start := time.Now()
 
@@ -82,7 +109,7 @@ func main() {
 
 	for card := range cardsChannel {
 		cards = append(cards, card)
-		saveCard(db, card, &wg)
+		saveCard(db, card, &releaseDateReference, &wg)
 
 		if len(cards) == 100 {
 			err := meiliService.SaveAll(cards)
@@ -121,13 +148,30 @@ func main() {
 	}
 }
 
-func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
+func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time, wg *sync.WaitGroup) {
 	if !hasSupportedLanguage(card.Lang) || card.Digital {
 		return
 	}
 
 	if card.Layout == "art_series" {
 		return
+	}
+
+	releasedAt, _ := time.Parse(time.DateOnly, card.ReleasedAt)
+
+	if releasedAt.After(time.Now()) {
+		slog.Info("Skipping unreleased card", "cardId", card.ID, "cardName", card.Name)
+		return
+	}
+
+	if releaseDateReference != nil {
+		if releasedAt.Unix() < releaseDateReference.Unix() {
+			slog.Info("Skipping card due to release date validation reference",
+				"cardId", card.ID,
+				"releasedAt", releasedAt,
+				"releaseDateReference", releaseDateReference)
+			return
+		}
 	}
 
 	entity := models.FromCardJson(card)
@@ -141,7 +185,7 @@ func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
 			os.Exit(1)
 		}
 
-		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
+		slog.Info("Saved", "id", card.ID, "name", card.Name)
 	}()
 }
 
