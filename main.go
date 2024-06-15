@@ -4,29 +4,26 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jmoiron/sqlx"
-	"github.com/joho/godotenv"
 	"github.com/meilisearch/meilisearch-go"
+	"spellscan.com/card-loader/config"
 	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
 	"spellscan.com/card-loader/services"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		slog.Warn("Could not load .env file, using env variables instead")
-	}
+	cfg := config.LoadConfig()
 
-	meiliClient := getMeiliClient()
+	meiliClient := getMeiliClient(cfg)
 
 	meiliService := services.NewMeiliService(meiliClient)
 
-	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
+	db, err := sqlx.Connect("pgx", cfg.DbDsn)
 
 	if err != nil {
 		slog.Error("Could not connect to database", "err", err)
@@ -35,7 +32,7 @@ func main() {
 
 	db.SetMaxOpenConns(3)
 
-	metadataService := services.NewMetadataService(db)
+	metadataService := services.NewMetadataService(db, cfg)
 
 	jobResult, err := metadataService.GetLastJobResult()
 
@@ -66,9 +63,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	useReleaseDateReference, _ := strconv.ParseBool(os.Getenv("USE_RELEASE_DATE_REFERENCE"))
-
-	if !useReleaseDateReference {
+	if !cfg.UseReleaseDateReference {
 		start := time.Now()
 		slog.Info("USE_RELEASE_DATE_REFERENCE is false, removing all card fazes and image uris", "start", start)
 		clearCardFaces(db)
@@ -79,7 +74,7 @@ func main() {
 
 	var releaseDateReference time.Time
 
-	if useReleaseDateReference {
+	if cfg.UseReleaseDateReference {
 		rows, err := db.Query("SELECT max(released_at) FROM public.cards")
 
 		if err != nil {
@@ -197,10 +192,10 @@ func clearImageUris(db *sqlx.DB) {
 	db.Exec("DELETE FROM image_uris")
 }
 
-func getMeiliClient() *meilisearch.Client {
+func getMeiliClient(cfg *config.Config) *meilisearch.Client {
 	return meilisearch.NewClient(meilisearch.ClientConfig{
-		Host:   os.Getenv("MEILI_URL"),
-		APIKey: os.Getenv("MEILI_API_KEY"),
+		Host:   cfg.MeiliUrl,
+		APIKey: cfg.MeiliApiKey,
 	})
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"spellscan.com/card-loader/config"
 	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
 )
@@ -27,11 +28,12 @@ type MetadataService interface {
 }
 
 type metadataService struct {
-	db *sqlx.DB
+	db  *sqlx.DB
+	cfg *config.Config
 }
 
-func NewMetadataService(db *sqlx.DB) MetadataService {
-	return &metadataService{db: db}
+func NewMetadataService(db *sqlx.DB, cfg *config.Config) MetadataService {
+	return &metadataService{db: db, cfg: cfg}
 }
 
 func (m *metadataService) GetLastJobResult() (*models.JobResult, error) {
@@ -78,7 +80,7 @@ func (m *metadataService) GetRemoteBulkMetadata() (*objects.BulkMetadata, error)
 }
 
 func (m *metadataService) DownloadBulkFile(data *objects.BulkMetadata) error {
-	if os.Getenv("SKIP_DOWNLOAD") == "true" {
+	if m.cfg.SkipDownload {
 		slog.Info("Skipping Download")
 		return nil
 	}
