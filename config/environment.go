@@ -23,7 +23,7 @@ func LoadConfig() *Config {
 
 	return &Config{
 		DbDsn:                   os.Getenv("DB_DSN"),
-		MeiliApiKey:             os.Getenv("MEILI_URL"),
+		MeiliApiKey:             os.Getenv("MEILI_API_KEY"),
 		MeiliUrl:                os.Getenv("MEILI_URL"),
 		SkipDownload:            boolOrFalse("SKIP_DOWNLOAD"),
 		UseReleaseDateReference: boolOrFalse("USE_RELEASE_DATE_REFERENCE"),
