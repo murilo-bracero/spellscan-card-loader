@@ -52,3 +52,7 @@ func (cf *CardFace) Save(db *sqlx.DB) error {
 
 	return cf.ImageUris.Save(db)
 }
+
+func ClearCardFaces(db *sqlx.DB) {
+	db.Exec("DELETE FROM card_faces")
+}

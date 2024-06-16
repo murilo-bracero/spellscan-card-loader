@@ -7,34 +7,27 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jmoiron/sqlx"
-	"github.com/joho/godotenv"
-	"github.com/meilisearch/meilisearch-go"
+	"spellscan.com/card-loader/config"
 	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
 	"spellscan.com/card-loader/services"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		slog.Warn("Could not load .env file, using env variables instead")
-	}
+	cfg := config.LoadConfig()
 
-	meiliClient := getMeiliClient()
+	meiliClient := config.MeiliConnect(cfg)
 
 	meiliService := services.NewMeiliService(meiliClient)
 
-	db, err := sqlx.Connect("pgx", os.Getenv("DB_DSN"))
+	db, err := config.DbConnect(cfg)
 
 	if err != nil {
-		slog.Error("Could not connect to database", "err", err)
 		os.Exit(1)
 	}
 
-	db.SetMaxOpenConns(3)
-
-	metadataService := services.NewMetadataService(db)
+	metadataService := services.NewMetadataService(db, cfg)
 
 	jobResult, err := metadataService.GetLastJobResult()
 
@@ -65,8 +58,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	clearCardFaces(db)
-	clearImageUris(db)
+	if !cfg.UseReleaseDateReference {
+		start := time.Now()
+		slog.Info("USE_RELEASE_DATE_REFERENCE is false, removing all card fazes and image uris", "start", start)
+		models.ClearCardFaces(db)
+		models.ClearImageUris(db)
+		end := time.Now()
+		slog.Info("card faces and image uris removal finished", "end", end.Unix()-start.Unix())
+	}
+
+	var releaseDateReference time.Time
+
+	if cfg.UseReleaseDateReference {
+		rows, err := db.Query("SELECT max(released_at) FROM public.cards")
+
+		if err != nil {
+			slog.Error("Could not fetch max release date from database", "error", err)
+			os.Exit(1)
+		}
+
+		if rows.Next() {
+			if err := rows.Scan(&releaseDateReference); err != nil {
+				slog.Error("Could not fetch max release date from database", "error", err)
+				os.Exit(1)
+			}
+		}
+	}
 
 	start := time.Now()
 
@@ -82,7 +99,7 @@ func main() {
 
 	for card := range cardsChannel {
 		cards = append(cards, card)
-		saveCard(db, card, &wg)
+		saveCard(db, card, &releaseDateReference, &wg)
 
 		if len(cards) == 100 {
 			err := meiliService.SaveAll(cards)
@@ -113,6 +130,7 @@ func main() {
 
 	if err := meiliService.UpdateIndexes(); err != nil {
 		slog.Error("Could not update meili filter attributes", "error", err)
+		os.Exit(1)
 	}
 
 	if err := metadataService.Save(remoteBulkData, start, end); err != nil {
@@ -121,13 +139,30 @@ func main() {
 	}
 }
 
-func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
+func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time, wg *sync.WaitGroup) {
 	if !hasSupportedLanguage(card.Lang) || card.Digital {
 		return
 	}
 
 	if card.Layout == "art_series" {
 		return
+	}
+
+	releasedAt, _ := time.Parse(time.DateOnly, card.ReleasedAt)
+
+	if releasedAt.After(time.Now()) {
+		slog.Info("Skipping unreleased card", "cardId", card.ID, "cardName", card.Name)
+		return
+	}
+
+	if releaseDateReference != nil {
+		if releasedAt.Unix() < releaseDateReference.Unix() {
+			slog.Info("Skipping card due to release date validation reference",
+				"cardId", card.ID,
+				"releasedAt", releasedAt,
+				"releaseDateReference", releaseDateReference)
+			return
+		}
 	}
 
 	entity := models.FromCardJson(card)
@@ -141,23 +176,8 @@ func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup) {
 			os.Exit(1)
 		}
 
-		slog.Info("Saved", "id", card.ID, "name", card.Name, "type", card.TypeLine, "set", card.Set)
+		slog.Info("Saved", "id", card.ID, "name", card.Name)
 	}()
-}
-
-func clearCardFaces(db *sqlx.DB) {
-	db.Exec("DELETE FROM card_faces")
-}
-
-func clearImageUris(db *sqlx.DB) {
-	db.Exec("DELETE FROM image_uris")
-}
-
-func getMeiliClient() *meilisearch.Client {
-	return meilisearch.NewClient(meilisearch.ClientConfig{
-		Host:   os.Getenv("MEILI_URL"),
-		APIKey: os.Getenv("MEILI_API_KEY"),
-	})
 }
 
 func sendCardsToChannel(c chan *objects.Card) {
