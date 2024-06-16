@@ -49,3 +49,7 @@ func (iu *ImageUris) Save(db *sqlx.DB) error {
 
 	return nil
 }
+
+func ClearImageUris(db *sqlx.DB) {
+	db.Exec("DELETE FROM image_uris")
+}

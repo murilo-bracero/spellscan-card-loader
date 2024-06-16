@@ -7,9 +7,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jmoiron/sqlx"
-	"github.com/meilisearch/meilisearch-go"
 	"spellscan.com/card-loader/config"
 	"spellscan.com/card-loader/models"
 	"spellscan.com/card-loader/objects"
@@ -19,18 +17,15 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 
-	meiliClient := getMeiliClient(cfg)
+	meiliClient := config.MeiliConnect(cfg)
 
 	meiliService := services.NewMeiliService(meiliClient)
 
-	db, err := sqlx.Connect("pgx", cfg.DbDsn)
+	db, err := config.DbConnect(cfg)
 
 	if err != nil {
-		slog.Error("Could not connect to database", "err", err)
 		os.Exit(1)
 	}
-
-	db.SetMaxOpenConns(3)
 
 	metadataService := services.NewMetadataService(db, cfg)
 
@@ -66,8 +61,8 @@ func main() {
 	if !cfg.UseReleaseDateReference {
 		start := time.Now()
 		slog.Info("USE_RELEASE_DATE_REFERENCE is false, removing all card fazes and image uris", "start", start)
-		clearCardFaces(db)
-		clearImageUris(db)
+		models.ClearCardFaces(db)
+		models.ClearImageUris(db)
 		end := time.Now()
 		slog.Info("card faces and image uris removal finished", "end", end.Unix()-start.Unix())
 	}
@@ -135,6 +130,7 @@ func main() {
 
 	if err := meiliService.UpdateIndexes(); err != nil {
 		slog.Error("Could not update meili filter attributes", "error", err)
+		os.Exit(1)
 	}
 
 	if err := metadataService.Save(remoteBulkData, start, end); err != nil {
@@ -182,21 +178,6 @@ func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time, 
 
 		slog.Info("Saved", "id", card.ID, "name", card.Name)
 	}()
-}
-
-func clearCardFaces(db *sqlx.DB) {
-	db.Exec("DELETE FROM card_faces")
-}
-
-func clearImageUris(db *sqlx.DB) {
-	db.Exec("DELETE FROM image_uris")
-}
-
-func getMeiliClient(cfg *config.Config) *meilisearch.Client {
-	return meilisearch.NewClient(meilisearch.ClientConfig{
-		Host:   cfg.MeiliUrl,
-		APIKey: cfg.MeiliApiKey,
-	})
 }
 
 func sendCardsToChannel(c chan *objects.Card) {
