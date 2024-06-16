@@ -32,3 +32,6 @@ dockerRun:
 clean:
 	rm -r build || true
 	rm -r tmp || true
+
+showVersion:
+	@echo $(version)

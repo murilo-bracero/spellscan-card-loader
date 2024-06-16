@@ -1,0 +1,35 @@
+name: build image on successfully merge on develop
+on:
+  pull_request:
+    branches:
+      - develop
+    types:
+      - closed
+jobs:
+  build-and-push-image:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21.1'
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: 'ghcr.io'
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build binary
+        run: make clean build
+      
+      - name: Build and push container
+        run: make dockerBuild dockerPublish
