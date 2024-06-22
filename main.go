@@ -140,11 +140,27 @@ func main() {
 }
 
 func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time, wg *sync.WaitGroup) {
-	if !hasSupportedLanguage(card.Lang) || card.Digital {
+	if card.Digital {
+		slog.Info("Skipping digital card",
+			"cardId", card.ID,
+			"cardName", card.Name,
+			"isDigital", card.Digital)
 		return
 	}
 
-	if card.Layout == "art_series" {
+	if !hasSupportedLanguage(card.Lang) {
+		slog.Info("Skipping card with unsupported language",
+			"cardId", card.ID,
+			"cardName", card.Name,
+			"language", card.Lang)
+		return
+	}
+
+	if !hasSupportedLayout(card.Layout) {
+		slog.Info("Skipping card with unsupported layout",
+			"cardId", card.ID,
+			"cardName", card.Name,
+			"layout", card.Layout)
 		return
 	}
 
@@ -216,6 +232,17 @@ func sendCardsToChannel(c chan *objects.Card) {
 	}
 
 	close(c)
+}
+
+func hasSupportedLayout(layout string) bool {
+	unsupportedLayouts := []string{"token", "emblem", "augment", "host", "vanguard", "reversible_card", "scheme", "art_series", "double_faced_token"}
+
+	for _, sl := range unsupportedLayouts {
+		if sl == layout {
+			return false
+		}
+	}
+	return true
 }
 
 func hasSupportedLanguage(lang string) bool {
