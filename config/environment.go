@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	DbDsn                   string
+	DbMaxConnections        int
 	MeiliApiKey             string
 	MeiliUrl                string
 	SkipDownload            bool
@@ -23,6 +24,7 @@ func LoadConfig() *Config {
 
 	return &Config{
 		DbDsn:                   os.Getenv("DB_DSN"),
+		DbMaxConnections:        parseIntVar("DB_MAX_CONNECTIONS"),
 		MeiliApiKey:             os.Getenv("MEILI_API_KEY"),
 		MeiliUrl:                os.Getenv("MEILI_URL"),
 		SkipDownload:            boolOrFalse("SKIP_DOWNLOAD"),
@@ -36,6 +38,17 @@ func boolOrFalse(variable string) bool {
 	if err != nil {
 		slog.Warn("Could not convert variable to bool", "variable", variable)
 		return false
+	}
+
+	return value
+}
+
+func parseIntVar(variable string) int {
+	value, err := strconv.Atoi(os.Getenv(variable))
+
+	if err != nil {
+		slog.Warn("Could not convert variable to bool", "variable", variable)
+		return 0
 	}
 
 	return value

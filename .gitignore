@@ -22,6 +22,6 @@ go.work
 
 tmp/
 
-.env
+.env*
 main
 build/

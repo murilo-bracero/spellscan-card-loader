@@ -1,0 +1,69 @@
+version: "3.9"
+services:
+  spellscan-card-loader:
+    depends_on:
+      - db
+      - meili
+      - db-init
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 512M
+
+  meili:
+    image: getmeili/meilisearch:v1.5
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_ENV=development
+      - MEILI_MASTER_KEY=sandyejunior
+    networks:
+      default:
+        aliases:
+          - meili.spellscan.com
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 1G
+
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_PASSWORD=postgrespw
+    ports:
+      - "5432:5432"
+    networks:
+      default:
+        aliases:
+          - db.spellscan.com
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 1G
+
+  db-init:
+    image: ghcr.io/murilo-bracero/spellscan-database:latest
+    depends_on:
+      - db
+    environment:
+      - DATABASE_USERNAME=postgres
+      - DATABASE_PASSWORD=postgrespw
+      - DATABASE_HOST=db.spellscan.com
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 512M
+
+networks:
+  default:
+    external: false
+    name: spellscan-network
