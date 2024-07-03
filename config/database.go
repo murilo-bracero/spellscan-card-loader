@@ -15,7 +15,7 @@ func DbConnect(cfg *Config) (*sqlx.DB, error) {
 		return nil, err
 	}
 
-	db.SetMaxOpenConns(3)
+	db.SetMaxOpenConns(cfg.DbMaxConnections)
 
 	return db, nil
 }

@@ -14,6 +14,18 @@ import (
 	"spellscan.com/card-loader/services"
 )
 
+type semaphore chan struct{}
+
+func (s semaphore) acquire() {
+	s <- struct{}{}
+}
+
+func (s semaphore) release() {
+	<-s
+}
+
+const max_semaphore = 100
+
 func main() {
 	cfg := config.LoadConfig()
 
@@ -58,29 +70,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if !cfg.UseReleaseDateReference {
-		start := time.Now()
-		slog.Info("USE_RELEASE_DATE_REFERENCE is false, removing all card fazes and image uris", "start", start)
-		models.ClearCardFaces(db)
-		models.ClearImageUris(db)
-		end := time.Now()
-		slog.Info("card faces and image uris removal finished", "end", end.Unix()-start.Unix())
-	}
-
 	var releaseDateReference time.Time
 
 	if cfg.UseReleaseDateReference {
 		rows, err := db.Query("SELECT max(released_at) FROM public.cards")
 
 		if err != nil {
-			slog.Error("Could not fetch max release date from database", "error", err)
-			os.Exit(1)
+			slog.Warn("Could not fetch max release date from database", "error", err)
 		}
 
 		if rows.Next() {
 			if err := rows.Scan(&releaseDateReference); err != nil {
-				slog.Error("Could not fetch max release date from database", "error", err)
-				os.Exit(1)
+				slog.Warn("Could not fetch max release date from database", "error", err)
 			}
 		}
 	}
@@ -95,11 +96,20 @@ func main() {
 
 	var cards []*objects.Card
 
-	var wg sync.WaitGroup
+	wg := new(sync.WaitGroup)
+
+	s := make(semaphore, max_semaphore)
 
 	for card := range cardsChannel {
+		if !isCardValid(card, &releaseDateReference) {
+			continue
+		}
+
 		cards = append(cards, card)
-		saveCard(db, card, &releaseDateReference, &wg)
+
+		wg.Add(1)
+		go saveCard(db, card, wg, &s)
+		s.acquire()
 
 		if len(cards) == 100 {
 			err := meiliService.SaveAll(cards)
@@ -139,61 +149,46 @@ func main() {
 	}
 }
 
-func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time, wg *sync.WaitGroup) {
+func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup, s *semaphore) {
+	entity := models.FromCardJson(card)
+
+	if err := entity.Save(db); err != nil {
+		slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
+		os.Exit(1)
+	}
+
+	slog.Info("Saved", "cardId", card.ID)
+
+	s.release()
+	wg.Done()
+}
+
+func isCardValid(card *objects.Card, releaseDateReference *time.Time) bool {
 	if card.Digital {
-		slog.Info("Skipping digital card",
-			"cardId", card.ID,
-			"cardName", card.Name,
-			"isDigital", card.Digital)
-		return
+		return false
 	}
 
 	if !hasSupportedLanguage(card.Lang) {
-		slog.Info("Skipping card with unsupported language",
-			"cardId", card.ID,
-			"cardName", card.Name,
-			"language", card.Lang)
-		return
+		return false
 	}
 
 	if !hasSupportedLayout(card.Layout) {
-		slog.Info("Skipping card with unsupported layout",
-			"cardId", card.ID,
-			"cardName", card.Name,
-			"layout", card.Layout)
-		return
+		return false
 	}
 
 	releasedAt, _ := time.Parse(time.DateOnly, card.ReleasedAt)
 
 	if releasedAt.After(time.Now()) {
-		slog.Info("Skipping unreleased card", "cardId", card.ID, "cardName", card.Name)
-		return
+		return false
 	}
 
 	if releaseDateReference != nil {
 		if releasedAt.Unix() < releaseDateReference.Unix() {
-			slog.Info("Skipping card due to release date validation reference",
-				"cardId", card.ID,
-				"releasedAt", releasedAt,
-				"releaseDateReference", releaseDateReference)
-			return
+			return false
 		}
 	}
 
-	entity := models.FromCardJson(card)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		if err := entity.Save(db); err != nil {
-			slog.Error("Could not save card in database", "cardId", card.ID, "err", err.Error())
-			os.Exit(1)
-		}
-
-		slog.Info("Saved", "id", card.ID, "name", card.Name)
-	}()
+	return true
 }
 
 func sendCardsToChannel(c chan *objects.Card) {
