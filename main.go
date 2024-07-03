@@ -101,19 +101,15 @@ func main() {
 	s := make(semaphore, max_semaphore)
 
 	for card := range cardsChannel {
+		if !isCardValid(card, &releaseDateReference) {
+			continue
+		}
+
 		cards = append(cards, card)
 
-		s.acquire()
-
 		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			defer s.release()
-
-			saveCard(db, card, &releaseDateReference)
-		}()
+		go saveCard(db, card, wg, &s)
+		s.acquire()
 
 		if len(cards) == 100 {
 			err := meiliService.SaveAll(cards)
@@ -153,11 +149,7 @@ func main() {
 	}
 }
 
-func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time) {
-	if !isCardValid(card, releaseDateReference) {
-		return
-	}
-
+func saveCard(db *sqlx.DB, card *objects.Card, wg *sync.WaitGroup, s *semaphore) {
 	entity := models.FromCardJson(card)
 
 	if err := entity.Save(db); err != nil {
@@ -166,6 +158,9 @@ func saveCard(db *sqlx.DB, card *objects.Card, releaseDateReference *time.Time) 
 	}
 
 	slog.Info("Saved", "cardId", card.ID)
+
+	s.release()
+	wg.Done()
 }
 
 func isCardValid(card *objects.Card, releaseDateReference *time.Time) bool {
