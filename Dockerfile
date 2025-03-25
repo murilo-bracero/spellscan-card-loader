@@ -1,13 +1,30 @@
-FROM alpine:3.16
+FROM golang:1.21-alpine3.20 as builder
 
 WORKDIR /app
 
-RUN chown 1001 /app \
-    && chmod "g+rwX" /app \
-    && chown 1001:root /app
+COPY go.mod go.sum ./
 
-COPY --chown=1001:root build/spellscan-card-loader spellscan-card-loader
+RUN go mod download
 
-USER 1001
+RUN apk add --no-cache make
+
+COPY . .
+
+RUN make build
+
+FROM alpine:3.20 as runner
+
+ENV GROUP=spellscancardloader
+ENV USER=spellscancardloaderapp
+ENV UID=10001
+
+RUN addgroup -S ${GROUP} \
+    && adduser -S -u ${UID} -g ${GROUP} ${USER}
+
+WORKDIR /app
+
+COPY --chown=${USER}:${GROUP} --from=builder /app/build/spellscan-card-loader spellscan-card-loader
+
+USER ${USER}
 
 CMD ["./spellscan-card-loader"]
