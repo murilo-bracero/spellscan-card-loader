@@ -29,7 +29,5 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build binary
-        run: make clean build
-      
-      - name: Build and push container
-        run: make dockerBuild dockerPublish
+        run: make clean build dockerBuild dockerPublish
+

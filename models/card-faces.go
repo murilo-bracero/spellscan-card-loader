@@ -44,6 +44,7 @@ func (cf *CardFace) Save(db *sqlx.DB) error {
 		:flavor_text, 
 		:colors, 
 		:color_indicator)
+	ON CONFLICT DO NOTHING
 	`
 
 	if _, err := db.NamedExec(query, cf); err != nil {
@@ -51,8 +52,4 @@ func (cf *CardFace) Save(db *sqlx.DB) error {
 	}
 
 	return cf.ImageUris.Save(db)
-}
-
-func ClearCardFaces(db *sqlx.DB) {
-	db.Exec("DELETE FROM card_faces")
 }
